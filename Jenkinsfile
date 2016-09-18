@@ -21,26 +21,30 @@ gitlabBuilds(builds: ["junit test & compile", "sonar code quality", "deploy to d
     }
   }
 
-// define Openshift variables
-
+  // Define the Service application name and tags for the first Openshift environment
+  env.OC_APP_NAME="petclinic"
+  env.OC_PROJECT="web-team-dev"
+  
   stage 'deploy to dev'
   node ('docker') {
     gitlabCommitStatus('deploy to dev') {
       withCredentials([[$class: 'UsernamePasswordMultiBinding', credentialsId: 'oc-login', passwordVariable: 'OC_PASSWORD', usernameVariable: 'OC_USER']]) {
         sh '''#!/bin/bash -e
-        APP_NAME=dev-petclinic
-        OC_PROJECT=dev-env
-        oc login $OC_HOST -u $OC_USER -p $OC_PASSWORD --insecure-skip-tls-verify=true
+        oc login ${OC_HOST} -u ${OC_USER} -p ${OC_PASSWORD} --insecure-skip-tls-verify=true
+        
+        OC_PROJECT_DESCRIPTION="Development"
+        oc new-project ${OC_PROJECT} --display-name="Web Team ${OC_PROJECT_DESCRIPTION}" --description="${OC_PROJECT_DESCRIPTION} project for the web team." | true
         oc project ${OC_PROJECT}
-        if [[ $(oc get deploymentconfigs | grep ${APP_NAME} | wc -l) -eq 0 ]]; 
+        
+        if [[ $(oc get deploymentconfigs | grep ${OC_APP_NAME} | wc -l) -eq 0 ]]; 
         then
           oc new-build -i wildfly:10.0 --binary=true --context-dir=/ --name=${APP_NAME}
-          oc start-build ${APP_NAME} --from-dir=target/ --follow
-          oc logs -f bc/${APP_NAME}
-          oc new-app -i ${APP_NAME}
-          oc expose svc/${APP_NAME}
+          oc start-build ${OC_APP_NAME} --from-dir=target/ --follow
+          oc logs -f bc/${OC_APP_NAME}
+          oc new-app -i ${OC_APP_NAME}
+          oc expose svc/${OC_APP_NAME}
         else
-          oc start-build ${APP_NAME} --from-dir=target/ --follow
+          oc start-build ${OC_APP_NAME} --from-dir=target/ --follow
         fi
         sleep 20
         '''
@@ -55,8 +59,7 @@ gitlabBuilds(builds: ["junit test & compile", "sonar code quality", "deploy to d
       checkout changelog: false, poll: false, scm: [$class: 'GitSCM', branches: [[name: '*/master']], doGenerateSubmoduleConfigurations: false, extensions: [[$class: 'RelativeTargetDirectory', relativeTargetDir: 'regression-test']], submoduleCfg: [], userRemoteConfigs: [[credentialsId: 'adop-jenkins-master', url: "git@gitlab:/${env.WORKSPACE_NAME}/adop-cartridge-java-regression-tests.git"]]]
       sh '''#!/bin/bash -e
       CONTAINER_NAME="owasp_zap-${gitlabSourceBranch}"
-      OC_PROJECT=dev-env
-      APP_URL="http://dev-petclinic-${OC_PROJECT}.${OC_APPS_DOMAIN}/petclinic"
+      OC_APP_URL="http://${OC_APP_NAME}-${OC_PROJECT}.${OC_APPS_DOMAIN}/petclinic"
       
       echo "Starting OWASP ZAP Intercepting Proxy"
       cd regression-test/
@@ -65,7 +68,7 @@ gitlabBuilds(builds: ["junit test & compile", "sonar code quality", "deploy to d
       echo "Sleeping for 30 seconds.. Waiting for OWASP Zap proxy to be up and running.."
       sleep 30
       echo "Starting Selenium test through maven.."
-      mvn clean -B test -DPETCLINIC_URL=${APP_URL} -DZAP_IP=${CONTAINER_NAME} -DZAP_PORT=9090 -DZAP_ENABLED=true
+      mvn clean -B test -DPETCLINIC_URL=${OC_APP_URL} -DZAP_IP=${CONTAINER_NAME} -DZAP_PORT=9090 -DZAP_ENABLED=true
       docker rm -f $CONTAINER_NAME
       '''
       step([$class: 'CucumberReportPublisher', fileExcludePattern: '', fileIncludePattern: '', ignoreFailedTests: false, jenkinsBasePath: '', jsonReportDirectory: 'regression-test/target', parallelTesting: false, pendingFails: false, skippedFails: false, undefinedFails: false])
@@ -75,13 +78,12 @@ gitlabBuilds(builds: ["junit test & compile", "sonar code quality", "deploy to d
   stage 'openshift: scale up environment'
   node ('docker') {
       sh '''#!/bin/bash -e
-      APP_NAME=dev-petclinic
       SCALE_COUNT=5
-      REPLICATE_CONTROLLER_NAME=$(oc get rc -l app=${APP_NAME} | tail -1 | awk '{print $1}')
+      REPLICATE_CONTROLLER_NAME=$(oc get rc -l app=${OC_APP_NAME} | tail -1 | awk '{print $1}')
       oc scale --replicas=${SCALE_COUNT} rc ${REPLICATE_CONTROLLER_NAME}
-      until [[ $( oc get pods | grep ${APP_NAME} | grep Running  | wc -l) -eq ${SCALE_COUNT} ]]; 
+      until [[ $( oc get pods | grep ${OC_APP_NAME} | grep Running  | wc -l) -eq ${SCALE_COUNT} ]]; 
       do
-         echo "Waiting for the service ${APP_NAME} to be scaled up to 5.."
+         echo "Waiting for the service ${OC_APP_NAME} to be scaled up to 5.."
          sleep 3
       done
       sleep 5
@@ -109,8 +111,7 @@ gitlabBuilds(builds: ["junit test & compile", "sonar code quality", "deploy to d
      fi
      
      cd $JMETER_TESTDIR
-     OC_PROJECT=dev-env
-     PETCLINIC_HOST=dev-petclinic-${OC_PROJECT}.${OC_APPS_DOMAIN}
+     PETCLINIC_HOST=${OC_APP_NAME}-${OC_PROJECT}.${OC_APPS_DOMAIN}
      tar -xf apache-jmeter-2.13.tgz
      echo 'Changing user defined parameters for jmx file'
      sed -i 's/PETCLINIC_HOST_VALUE/'"${PETCLINIC_HOST}"'/g' src/test/jmeter/petclinic_test_plan.jmx
@@ -132,12 +133,16 @@ gitlabBuilds(builds: ["junit test & compile", "sonar code quality", "deploy to d
      // Scale Down the service
      sh '''#!/bin/bash -e
      APP_NAME=dev-petclinic
-     REPLICATE_CONTROLLER_NAME=$(oc get rc -l app=${APP_NAME} | tail -1 | awk '{print $1}')
+     REPLICATE_CONTROLLER_NAME=$(oc get rc -l app=${OC_APP_NAME} | tail -1 | awk '{print $1}')
      oc scale --replicas=1 rc ${REPLICATE_CONTROLLER_NAME}
      '''
     }
   }
 
+  // Define the Service application name and tags for the second Openshift environment
+  env.OC_APP_NAME="petclinic"
+  env.OC_PROJECT="web-team-stage"
+  
   stage 'deploy to stage'
   timeout(time:1, unit:'DAYS') {
     input message:'Approve Deployment?', submitter: 'administrators'
@@ -146,19 +151,21 @@ gitlabBuilds(builds: ["junit test & compile", "sonar code quality", "deploy to d
     gitlabCommitStatus('deploy to stage') {
       withCredentials([[$class: 'UsernamePasswordMultiBinding', credentialsId: 'oc-login', passwordVariable: 'OC_PASSWORD', usernameVariable: 'OC_USER']]) {
         sh '''#!/bin/bash -e
-        APP_NAME=stage-petclinic
-        OC_PROJECT=stage-env
         oc login $OC_HOST -u $OC_USER -p $OC_PASSWORD --insecure-skip-tls-verify=true
+        
+        OC_PROJECT_DESCRIPTION="Staging Environment"
+        oc new-project ${OC_PROJECT} --display-name="Web Team ${OC_PROJECT_DESCRIPTION}" --description="${OC_PROJECT_DESCRIPTION} project for the web team." | true
         oc project ${OC_PROJECT}
-        if [[ $(oc get deploymentconfigs | grep ${APP_NAME} | wc -l) -eq 0 ]]; 
+        
+        if [[ $(oc get deploymentconfigs | grep ${OC_APP_NAME} | wc -l) -eq 0 ]]; 
         then
           oc new-build -i wildfly:10.0 --binary=true --context-dir=/ --name=${APP_NAME}
-          oc start-build ${APP_NAME} --from-dir=target/ --follow
-          oc logs -f bc/${APP_NAME}
-          oc new-app -i ${APP_NAME}
-          oc expose svc/${APP_NAME}
+          oc start-build ${OC_APP_NAME} --from-dir=target/ --follow
+          oc logs -f bc/${OC_APP_NAME}
+          oc new-app -i ${OC_APP_NAME}
+          oc expose svc/${OC_APP_NAME}
         else
-          oc start-build ${APP_NAME} --from-dir=target/ --follow
+          oc start-build ${OC_APP_NAME} --from-dir=target/ --follow
         fi
         sleep 20
         '''
@@ -166,7 +173,9 @@ gitlabBuilds(builds: ["junit test & compile", "sonar code quality", "deploy to d
     }
   }
   
-  addGitLabMRComment '[Jenkins]: Deployed to Stage.'
+  // Define the Service application name and tags for the first Openshift environment
+  env.OC_APP_NAME="petclinic"
+  env.OC_PROJECT="web-team-prod"
   
   stage 'deploy to prod'
   timeout(time:1, unit:'DAYS') {
@@ -176,19 +185,21 @@ gitlabBuilds(builds: ["junit test & compile", "sonar code quality", "deploy to d
     gitlabCommitStatus('deploy to prod') {
       withCredentials([[$class: 'UsernamePasswordMultiBinding', credentialsId: 'oc-login', passwordVariable: 'OC_PASSWORD', usernameVariable: 'OC_USER']]) {
         sh '''#!/bin/bash -e
-        APP_NAME=prod-petclinic
-        OC_PROJECT=prod-env
         oc login $OC_HOST -u $OC_USER -p $OC_PASSWORD --insecure-skip-tls-verify=true
+        
+        OC_PROJECT_DESCRIPTION="Production Environment"
+        oc new-project ${OC_PROJECT} --display-name="Web Team ${OC_PROJECT_DESCRIPTION}" --description="${OC_PROJECT_DESCRIPTION} project for the web team." | true
         oc project ${OC_PROJECT}
+        
         if [[ $(oc get deploymentconfigs | grep ${APP_NAME} | wc -l) -eq 0 ]]; 
         then
           oc new-build -i wildfly:10.0 --binary=true --context-dir=/ --name=${APP_NAME}
-          oc start-build ${APP_NAME} --from-dir=target/ --follow
-          oc logs -f bc/${APP_NAME}
-          oc new-app -i ${APP_NAME}
-          oc expose svc/${APP_NAME}
+          oc start-build ${OC_APP_NAME} --from-dir=target/ --follow
+          oc logs -f bc/${OC_APP_NAME}
+          oc new-app -i ${OC_APP_NAME}
+          oc expose svc/${OC_APP_NAME}
         else
-          oc start-build ${APP_NAME} --from-dir=target/ --follow
+          oc start-build ${OC_APP_NAME} --from-dir=target/ --follow
         fi
         sleep 20
         '''
