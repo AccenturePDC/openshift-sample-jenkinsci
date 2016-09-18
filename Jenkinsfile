@@ -213,7 +213,7 @@ gitlabBuilds(builds: ["junit test & compile", "sonar code quality", "deploy to d
           oc start-build ${OC_APP_NAME} --from-dir=target/ --follow
           oc logs -f bc/${OC_APP_NAME}
           oc new-app -i ${OC_APP_NAME}
-          oc expose svc/${OC_APP_NAME} --hostname="${OC_APPS_DOMAIN}" --target="/petclinic"
+          oc expose svc/${OC_APP_NAME} --hostname="${OC_APPS_DOMAIN}" --path="/petclinic"
         else
           oc start-build ${OC_APP_NAME} --from-dir=target/ --follow
         fi
