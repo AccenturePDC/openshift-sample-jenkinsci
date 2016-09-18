@@ -1,17 +1,4 @@
-/** Tested using Jenkins 2.7 with Gitlab plugin 1.4 and Gitlab 8.11 CE
- * A sample Jenkinsfile for running a Continuous Delivery Pipeline upon Merge Request received from the project  
- * 'git@gitlab:adopadmin/spring-petclinic.git' from Gitlab
-*/
-
-/** 
- * This property is required to enable gitlab features like gitlabCommitStatus and gitlabBuilds
- * Though it looks redundant when default applied with Gitlab Connection upon Job creation. There is an existing issue where 
- * having this property resets/deletes the Gitlab Push after the Pipeline runs.
- * Uncomment/comment this line for workaround.
-*/
-properties properties: [[$class: 'GitLabConnectionProperty', gitLabConnection: 'ADOP Gitlab']]
-
-def scmURL = "git@gitlab:${env.WORKSPACE}/spring-petclinic.git"
+def scmURL = "git@gitlab:${env.WORKSPACE_NAME}/spring-petclinic.git"
 
 addGitLabMRComment '[Jenkins]: A Pipeline has started.'
 
@@ -20,7 +7,7 @@ gitlabBuilds(builds: ["junit test & compile", "sonar code quality", "deploy to d
   node ('docker') {
     def mvnHome = tool name: 'ADOP Maven', type: 'hudson.tasks.Maven$MavenInstallation'
     gitlabCommitStatus('junit test & compile') {
-      checkout changelog: true, poll: true, scm: [$class: 'GitSCM', branches: [[name: "origin/${env.gitlabSourceBranch}"]], doGenerateSubmoduleConfigurations: false, extensions: [[$class: 'PreBuildMerge', options: [fastForwardMode: 'FF', mergeRemote: 'origin', mergeStrategy: 'default', mergeTarget: "master"]]], submoduleCfg: [], userRemoteConfigs: [[credentialsId: 'adop-jenkins-master', name: 'origin', url: "${scmURL}"]]]
+      checkout([$class: 'GitSCM', branches: [[name: 'origin/${gitlabSourceBranch}']], doGenerateSubmoduleConfigurations: false, extensions: [], submoduleCfg: [], userRemoteConfigs: [[credentialsId: 'adop-jenkins-master', name: 'origin', refspec: '+refs/heads/*:refs/remotes/origin/* ', url: "${scmURL}" ]]])
       sh "${mvnHome}/bin/mvn package "
       junit '**/target/surefire-reports/TEST-*.xml'
     }
@@ -63,7 +50,7 @@ gitlabBuilds(builds: ["junit test & compile", "sonar code quality", "deploy to d
     def mvnHome = tool name: 'ADOP Maven', type: 'hudson.tasks.Maven$MavenInstallation'
     gitlabCommitStatus('regression test') {
       env.PATH = "${mvnHome}/bin:${env.PATH}"
-      checkout changelog: false, poll: false, scm: [$class: 'GitSCM', branches: [[name: '*/master']], doGenerateSubmoduleConfigurations: false, extensions: [[$class: 'RelativeTargetDirectory', relativeTargetDir: 'regression-test']], submoduleCfg: [], userRemoteConfigs: [[credentialsId: 'adop-jenkins-master', url: "git@gitlab:/${env.WORKSPACE}/adop-cartridge-java-regression-tests.git"]]]
+      checkout changelog: false, poll: false, scm: [$class: 'GitSCM', branches: [[name: '*/master']], doGenerateSubmoduleConfigurations: false, extensions: [[$class: 'RelativeTargetDirectory', relativeTargetDir: 'regression-test']], submoduleCfg: [], userRemoteConfigs: [[credentialsId: 'adop-jenkins-master', url: "git@gitlab:/${env.WORKSPACE_NAME}/adop-cartridge-java-regression-tests.git"]]]
       sh '''#!/bin/bash -e
       CONTAINER_NAME="owasp_zap-${gitlabSourceBranch}"
       OC_PROJECT=dev-env
