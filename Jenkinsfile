@@ -6,18 +6,27 @@ gitlabBuilds(builds: ["junit test & compile", "sonar code quality", "deploy to d
   node ('docker') {
     def mvnHome = tool name: 'ADOP Maven', type: 'hudson.tasks.Maven$MavenInstallation'
     gitlabCommitStatus('junit test & compile') {
-      checkout([$class: 'GitSCM', branches: [[name: 'origin/${env.gitlabSourceBranch}']], doGenerateSubmoduleConfigurations: false, extensions: [], submoduleCfg: [], userRemoteConfigs: [[credentialsId: 'adop-jenkins-master', name: 'origin', refspec: '+refs/heads/*:refs/remotes/origin/* ', url: "${scmURL}" ]]])
+      checkout([$class: 'GitSCM', branches: [[name: '*/master']], doGenerateSubmoduleConfigurations: false, extensions: [], submoduleCfg: [], userRemoteConfigs: [[credentialsId: 'adop-jenkins-master', name: 'origin', url: "${scmURL}" ]]])
       sh "${mvnHome}/bin/mvn package "
       junit '**/target/surefire-reports/TEST-*.xml'
     }
   }
+  
+  // define Sonar variables
+  env.DB_PASSWORD = env.SONAR_DB_PASSWORD
+  env.DB_USER = env.SONAR_DB_LOGIN
   
   stage 'sonar code quality'
   node ('docker') {
     def mvnHome = tool name: 'ADOP Maven', type: 'hudson.tasks.Maven$MavenInstallation' 
     env.PATH = "${mvnHome}/bin:${env.PATH}"
     gitlabCommitStatus('sonar code quality') {
-        sh 'mvn sonar:sonar -Dsonar.host.url=http://sonar:9000/sonar -Dsonar.login=${INITIAL_ADMIN_USER} -Dsonar.password=${INITIAL_ADMIN_PASSWORD_PLAIN} -Dsonar.jdbc.url=jdbc:mysql://sonar-mysql:3306/sonar?useUnicode=true&characterEncoding=utf8&rewriteBatchedStatements=true -Dsonar.jdbc.username=${SONAR_DB_PASSWORD} -Dsonar.jdbc.password=${SONAR_DB_LOGIN}'
+        sh '''#!/bin/bash -e
+        mvn sonar:sonar -Dsonar.host.url=http://sonar:9000/sonar \
+            -Dsonar.login=${INITIAL_ADMIN_USER} -Dsonar.password=${INITIAL_ADMIN_PASSWORD} \
+            -Dsonar.jdbc.url='jdbc:mysql://sonar-mysql:3306/sonar?useUnicode=true&characterEncoding=utf8&rewriteBatchedStatements=true' \
+            -Dsonar.jdbc.username=sonar -Dsonar.jdbc.password=sonar
+        '''
     }
   }
 
@@ -38,7 +47,7 @@ gitlabBuilds(builds: ["junit test & compile", "sonar code quality", "deploy to d
         
         if [[ $(oc get deploymentconfigs | grep ${OC_APP_NAME} | wc -l) -eq 0 ]]; 
         then
-          oc new-build -i wildfly:10.0 --binary=true --context-dir=/ --name=${APP_NAME}
+          oc new-build -i wildfly:10.0 --binary=true --context-dir=/ --name=${OC_APP_NAME}
           oc start-build ${OC_APP_NAME} --from-dir=target/ --follow
           oc logs -f bc/${OC_APP_NAME}
           oc new-app -i ${OC_APP_NAME}
@@ -46,7 +55,7 @@ gitlabBuilds(builds: ["junit test & compile", "sonar code quality", "deploy to d
         else
           oc start-build ${OC_APP_NAME} --from-dir=target/ --follow
         fi
-        sleep 20
+        sleep 30
         '''
       }
     }
@@ -58,18 +67,18 @@ gitlabBuilds(builds: ["junit test & compile", "sonar code quality", "deploy to d
       env.PATH = "${mvnHome}/bin:${env.PATH}"
       checkout changelog: false, poll: false, scm: [$class: 'GitSCM', branches: [[name: '*/master']], doGenerateSubmoduleConfigurations: false, extensions: [[$class: 'RelativeTargetDirectory', relativeTargetDir: 'regression-test']], submoduleCfg: [], userRemoteConfigs: [[credentialsId: 'adop-jenkins-master', url: "git@gitlab:/${env.WORKSPACE_NAME}/adop-cartridge-java-regression-tests.git"]]]
       sh '''#!/bin/bash -e
-      CONTAINER_NAME="owasp_zap-${gitlabSourceBranch}"
+      CONTAINER_NAME="owasp_zap-${gitlabSourceBranch:-main}"
       OC_APP_URL="http://${OC_APP_NAME}-${OC_PROJECT}.${OC_APPS_DOMAIN}/petclinic"
       
       echo "Starting OWASP ZAP Intercepting Proxy"
       cd regression-test/
-      docker rm -f $CONTAINER_NAME | true
+      docker rm -f ${CONTAINER_NAME} | true
       docker run -it -d --net=$DOCKER_NETWORK_NAME -e affinity:container==jenkins-slave --name ${CONTAINER_NAME} -P nhantd/owasp_zap start zap-test
       echo "Sleeping for 30 seconds.. Waiting for OWASP Zap proxy to be up and running.."
       sleep 30
       echo "Starting Selenium test through maven.."
       mvn clean -B test -DPETCLINIC_URL=${OC_APP_URL} -DZAP_IP=${CONTAINER_NAME} -DZAP_PORT=9090 -DZAP_ENABLED=true
-      docker rm -f $CONTAINER_NAME
+      docker rm -f ${CONTAINER_NAME}
       '''
       step([$class: 'CucumberReportPublisher', fileExcludePattern: '', fileIncludePattern: '', ignoreFailedTests: false, jenkinsBasePath: '', jsonReportDirectory: 'regression-test/target', parallelTesting: false, pendingFails: false, skippedFails: false, undefinedFails: false])
     }    
@@ -159,7 +168,7 @@ gitlabBuilds(builds: ["junit test & compile", "sonar code quality", "deploy to d
         
         if [[ $(oc get deploymentconfigs | grep ${OC_APP_NAME} | wc -l) -eq 0 ]]; 
         then
-          oc new-build -i wildfly:10.0 --binary=true --context-dir=/ --name=${APP_NAME}
+          oc new-build -i wildfly:10.0 --binary=true --context-dir=/ --name=${OC_APP_NAME}
           oc start-build ${OC_APP_NAME} --from-dir=target/ --follow
           oc logs -f bc/${OC_APP_NAME}
           oc new-app -i ${OC_APP_NAME}
@@ -167,7 +176,7 @@ gitlabBuilds(builds: ["junit test & compile", "sonar code quality", "deploy to d
         else
           oc start-build ${OC_APP_NAME} --from-dir=target/ --follow
         fi
-        sleep 20
+        sleep 30
         '''
       }
     }
@@ -191,9 +200,9 @@ gitlabBuilds(builds: ["junit test & compile", "sonar code quality", "deploy to d
         oc new-project ${OC_PROJECT} --display-name="Web Team ${OC_PROJECT_DESCRIPTION}" --description="${OC_PROJECT_DESCRIPTION} project for the web team." | true
         oc project ${OC_PROJECT}
         
-        if [[ $(oc get deploymentconfigs | grep ${APP_NAME} | wc -l) -eq 0 ]]; 
+        if [[ $(oc get deploymentconfigs | grep ${OC_APP_NAME} | wc -l) -eq 0 ]]; 
         then
-          oc new-build -i wildfly:10.0 --binary=true --context-dir=/ --name=${APP_NAME}
+          oc new-build -i wildfly:10.0 --binary=true --context-dir=/ --name=${OC_APP_NAME}
           oc start-build ${OC_APP_NAME} --from-dir=target/ --follow
           oc logs -f bc/${OC_APP_NAME}
           oc new-app -i ${OC_APP_NAME}
@@ -201,7 +210,7 @@ gitlabBuilds(builds: ["junit test & compile", "sonar code quality", "deploy to d
         else
           oc start-build ${OC_APP_NAME} --from-dir=target/ --follow
         fi
-        sleep 20
+        sleep 30
         '''
       }
     }
