@@ -42,10 +42,21 @@ gitlabBuilds(builds: ["junit test & compile", "sonar code quality", "deploy to d
         oc login ${OC_HOST} -u ${OC_USER} -p ${OC_PASSWORD} --insecure-skip-tls-verify=true
         
         OC_PROJECT_DESCRIPTION="Development"
-        oc new-project ${OC_PROJECT} --display-name="Web Team ${OC_PROJECT_DESCRIPTION}" --description="${OC_PROJECT_DESCRIPTION} project for the web team." | true
+        oc new-project ${OC_PROJECT} --display-name="Web Team ${OC_PROJECT_DESCRIPTION}" \
+                --description="${OC_PROJECT_DESCRIPTION} project for the web team." | true
         oc project ${OC_PROJECT}
         
-        #paste back here
+        if [[ $(oc get deploymentconfigs | grep ${OC_APP_NAME} | wc -l) -eq 0 ]]; 
+        then
+          oc new-build -i wildfly:10.0 --binary=true --context-dir=/ --name=${OC_APP_NAME}
+          oc start-build ${OC_APP_NAME} --from-dir=target/ --follow
+          oc logs -f bc/${OC_APP_NAME}
+          oc new-app -i ${OC_APP_NAME}
+          oc expose svc/${OC_APP_NAME}
+        else
+          oc start-build ${OC_APP_NAME} --from-dir=target/ --follow
+        fi
+        sleep 30
         '''
       }
     }
@@ -63,7 +74,8 @@ gitlabBuilds(builds: ["junit test & compile", "sonar code quality", "deploy to d
       echo "Starting OWASP ZAP Intercepting Proxy"
       cd regression-test/
       docker rm -f ${CONTAINER_NAME} | true
-      docker run -it -d --net=$DOCKER_NETWORK_NAME -e affinity:container==jenkins-slave --name ${CONTAINER_NAME} -P nhantd/owasp_zap start zap-test
+      docker run -it -d --net=$DOCKER_NETWORK_NAME -e affinity:container==jenkins-slave \
+              --name ${CONTAINER_NAME} -P nhantd/owasp_zap start zap-test
       echo "Sleeping for 30 seconds.. Waiting for OWASP Zap proxy to be up and running.."
       sleep 30
       echo "Starting Selenium test through maven.."
@@ -118,8 +130,10 @@ gitlabBuilds(builds: ["junit test & compile", "sonar code quality", "deploy to d
      sed -i 's/PETCLINIC_PORT_VALUE/80/g' src/test/jmeter/petclinic_test_plan.jmx
      sed -i 's/CONTEXT_WEB_VALUE/petclinic/g' src/test/jmeter/petclinic_test_plan.jmx
      sed -i 's/HTTPSampler.path"></HTTPSampler.path">petclinic</g' src/test/jmeter/petclinic_test_plan.jmx
+     
      cd ../
-     ant -f $JMETER_TESTDIR/apache-jmeter-2.13/extras/build.xml -Dtestpath=${WORKSPACE}/${JMETER_TESTDIR}/src/test/jmeter -Dtest=petclinic_test_plan
+     ant -f $JMETER_TESTDIR/apache-jmeter-2.13/extras/build.xml \
+            -Dtestpath=${WORKSPACE}/${JMETER_TESTDIR}/src/test/jmeter -Dtest=petclinic_test_plan
      
      cd ${WORKSPACE}/src/test/gatling
      sed -i "s+###TOKEN_VALID_URL###+http://${PETCLINIC_HOST}+g" src/test/scala/default/RecordedSimulation.scala
@@ -154,7 +168,8 @@ gitlabBuilds(builds: ["junit test & compile", "sonar code quality", "deploy to d
         oc login $OC_HOST -u $OC_USER -p $OC_PASSWORD --insecure-skip-tls-verify=true
         
         OC_PROJECT_DESCRIPTION="Staging Environment"
-        oc new-project ${OC_PROJECT} --display-name="Web Team ${OC_PROJECT_DESCRIPTION}" --description="${OC_PROJECT_DESCRIPTION} project for the web team." | true
+        oc new-project ${OC_PROJECT} --display-name="Web Team ${OC_PROJECT_DESCRIPTION}" \
+              --description="${OC_PROJECT_DESCRIPTION} project for the web team." | true
         oc project ${OC_PROJECT}
         
         if [[ $(oc get deploymentconfigs | grep ${OC_APP_NAME} | wc -l) -eq 0 ]]; 
@@ -188,7 +203,8 @@ gitlabBuilds(builds: ["junit test & compile", "sonar code quality", "deploy to d
         oc login $OC_HOST -u $OC_USER -p $OC_PASSWORD --insecure-skip-tls-verify=true
         
         OC_PROJECT_DESCRIPTION="Production Environment"
-        oc new-project ${OC_PROJECT} --display-name="Web Team ${OC_PROJECT_DESCRIPTION}" --description="${OC_PROJECT_DESCRIPTION} project for the web team." | true
+        oc new-project ${OC_PROJECT} --display-name="Web Team ${OC_PROJECT_DESCRIPTION}" \
+              --description="${OC_PROJECT_DESCRIPTION} project for the web team." | true
         oc project ${OC_PROJECT}
         
         if [[ $(oc get deploymentconfigs | grep ${OC_APP_NAME} | wc -l) -eq 0 ]]; 
