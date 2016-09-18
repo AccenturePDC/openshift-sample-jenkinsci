@@ -1,13 +1,12 @@
+// Sample spring project git url
 def scmURL = "git@gitlab:${env.WORKSPACE_NAME}/spring-petclinic.git"
-
-addGitLabMRComment '[Jenkins]: A Pipeline has started.'
 
 gitlabBuilds(builds: ["junit test & compile", "sonar code quality", "deploy to dev", "regression test", "performance test", "deploy to stage", "deploy to prod"]) {
   stage 'junit test & compile'
   node ('docker') {
     def mvnHome = tool name: 'ADOP Maven', type: 'hudson.tasks.Maven$MavenInstallation'
     gitlabCommitStatus('junit test & compile') {
-      checkout([$class: 'GitSCM', branches: [[name: 'origin/${gitlabSourceBranch}']], doGenerateSubmoduleConfigurations: false, extensions: [], submoduleCfg: [], userRemoteConfigs: [[credentialsId: 'adop-jenkins-master', name: 'origin', refspec: '+refs/heads/*:refs/remotes/origin/* ', url: "${scmURL}" ]]])
+      checkout([$class: 'GitSCM', branches: [[name: 'origin/${env.gitlabSourceBranch}']], doGenerateSubmoduleConfigurations: false, extensions: [], submoduleCfg: [], userRemoteConfigs: [[credentialsId: 'adop-jenkins-master', name: 'origin', refspec: '+refs/heads/*:refs/remotes/origin/* ', url: "${scmURL}" ]]])
       sh "${mvnHome}/bin/mvn package "
       junit '**/target/surefire-reports/TEST-*.xml'
     }
@@ -16,11 +15,14 @@ gitlabBuilds(builds: ["junit test & compile", "sonar code quality", "deploy to d
   stage 'sonar code quality'
   node ('docker') {
     def mvnHome = tool name: 'ADOP Maven', type: 'hudson.tasks.Maven$MavenInstallation' 
+    env.PATH = "${mvnHome}/bin:${env.PATH}"
     gitlabCommitStatus('sonar code quality') {
-        sh "${mvnHome}/bin/mvn sonar:sonar -Dsonar.host.url=http://sonar:9000/sonar -Dsonar.login=adopadmin -Dsonar.password=bryan123 -Dsonar.jdbc.url='jdbc:mysql://sonar-mysql:3306/sonar?useUnicode=true&characterEncoding=utf8&rewriteBatchedStatements=true' -Dsonar.jdbc.username=sonar -Dsonar.jdbc.password=sonar"
+        sh 'mvn sonar:sonar -Dsonar.host.url=http://sonar:9000/sonar -Dsonar.login=${INITIAL_ADMIN_USER} -Dsonar.password=${INITIAL_ADMIN_PASSWORD_PLAIN} -Dsonar.jdbc.url=jdbc:mysql://sonar-mysql:3306/sonar?useUnicode=true&characterEncoding=utf8&rewriteBatchedStatements=true -Dsonar.jdbc.username=${SONAR_DB_PASSWORD} -Dsonar.jdbc.password=${SONAR_DB_LOGIN}'
     }
   }
-  
+
+// define Openshift variables
+
   stage 'deploy to dev'
   node ('docker') {
     gitlabCommitStatus('deploy to dev') {
@@ -135,16 +137,6 @@ gitlabBuilds(builds: ["junit test & compile", "sonar code quality", "deploy to d
      '''
     }
   }
-  
-  stage 'merge request approval'
-  timeout(time:1, unit:'DAYS') {
-    input message:'All testing has passed. Approve merge request?', submitter: 'administrators'
-  }
-  node ('docker') {
-      acceptGitLabMR '[Jenkins]: All test has completed. Merge request accepted.'
-  }
-  
-  addGitLabMRComment '[Jenkins]: Merged by Jenkins.'
 
   stage 'deploy to stage'
   timeout(time:1, unit:'DAYS') {
@@ -203,7 +195,5 @@ gitlabBuilds(builds: ["junit test & compile", "sonar code quality", "deploy to d
       }
     }
   }
-  
-    addGitLabMRComment '[Jenkins]: Deployed to Prod.'
     
 }
