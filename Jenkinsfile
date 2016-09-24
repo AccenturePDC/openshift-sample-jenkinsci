@@ -40,23 +40,23 @@ gitlabBuilds(builds: ["junit test & compile", "sonar code quality", "deploy to d
   node ('docker') {
     gitlabCommitStatus('deploy to dev') {
       withCredentials([[$class: 'UsernamePasswordMultiBinding', credentialsId: 'oc-login', passwordVariable: 'OC_PASSWORD', usernameVariable: 'OC_USER']]) {
+        env.WORKSPACE=pwd()
         sh '''#!/bin/bash -e
-        
         # Ensure that oc command line is installed
-        if [[ -f /usr/bin/oc ]]; then
+        if [[ ! -f /usr/bin/oc ]]; then
+          echo "oc command not installed."
           cd /opt
           # Delete any openshift related installer
-          rm -fr openshift*
+          rm -fr openshift* /usr/bin/oc
           # Install openshift commandline
           wget ${OC_DOWNLOAD_URL}
-          tar -xvf ${OC_INSTALLER}
+          tar -xzf ${OC_BINARY}
           cd $(ls | grep openshift)
           ln -sv $(pwd)/oc /usr/bin/oc
-          cd -
         fi
         
+        cd ${WORKSPACE}
         oc login ${OC_HOST} -u ${OC_USER} -p ${OC_PASSWORD} --insecure-skip-tls-verify=true
-        
         OC_PROJECT_DESCRIPTION="Development"
         oc new-project ${OC_PROJECT} --display-name="Web Team ${OC_PROJECT_DESCRIPTION}" \
                 --description="${OC_PROJECT_DESCRIPTION} project for the web team." | true
