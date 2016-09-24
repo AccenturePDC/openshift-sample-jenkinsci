@@ -33,12 +33,28 @@ gitlabBuilds(builds: ["junit test & compile", "sonar code quality", "deploy to d
   // Define the Service application name and tags for the first Openshift environment
   env.OC_APP_NAME="petclinic"
   env.OC_PROJECT="web-team-dev"
+  env.OC_DOWNLOAD_URL="https://github.com/openshift/origin/releases/download/v1.3.0/openshift-origin-client-tools-v1.3.0-3ab7af3d097b57f933eccef684a714f2368804e7-linux-64bit.tar.gz"
+  env.OC_BINARY="openshift-origin-client-tools-v1.3.0-3ab7af3d097b57f933eccef684a714f2368804e7-linux-64bit.tar.gz"
   
   stage 'deploy to dev'
   node ('docker') {
     gitlabCommitStatus('deploy to dev') {
       withCredentials([[$class: 'UsernamePasswordMultiBinding', credentialsId: 'oc-login', passwordVariable: 'OC_PASSWORD', usernameVariable: 'OC_USER']]) {
         sh '''#!/bin/bash -e
+        
+        # Ensure that oc command line is installed
+        if [[ -f /usr/bin/oc ]]; then
+          cd /opt
+          # Delete any openshift related installer
+          rm -fr openshift*
+          # Install openshift commandline
+          wget ${OC_DOWNLOAD_URL}
+          tar -xvf ${OC_INSTALLER}
+          cd $(ls | grep openshift)
+          ln -sv $(pwd)/oc /usr/bin/oc
+          cd -
+        fi
+        
         oc login ${OC_HOST} -u ${OC_USER} -p ${OC_PASSWORD} --insecure-skip-tls-verify=true
         
         OC_PROJECT_DESCRIPTION="Development"
